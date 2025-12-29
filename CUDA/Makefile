@@ -106,5 +106,4 @@ clean:
 			echo "Running..."; \
 			$(DIR)/$@_runner 2>&1 | tee $(DIR)/run_$(TIMESTAMP).log; \
 		fi; \
-		rm -f $(DIR)/$@_runner; \
 	fi
