@@ -1,15 +1,14 @@
 SHELL := /bin/bash
 NVCC := nvcc
-# Adjust architecture if needed. sm_89 is for RTX 4090.
-# NVCC_FLAGS := -O3 -arch=sm_89 --std=c++17
+
+# arch: sm_89 for RTX 4090 (Ada Lovelance)
 NVCC_FLAGS := -O0 -arch=sm_89 --std=c++17
 
 TIMESTAMP := $(shell date +%Y%m%d_%H%M%S)
 
-# Helper to find the directory for a given ID (e.g. 01 -> 01-vecadd)
 FIND_DIR = $(shell find . -maxdepth 1 -type d -name "$(1)-*" | head -n 1)
 
-.PHONY: all clean bench help
+.PHONY: all clean clean-all bench help ptx sass
 
 all: help
 
@@ -20,10 +19,12 @@ help:
 	@echo "  make ptx <id>    Generate PTX assembly (e.g., make ptx 01)"
 	@echo "  make sass <id>   Generate SASS assembly (e.g., make sass 01)"
 
-clean:
+# Global clean (use: make clean-all)
+clean-all:
 	rm -f *_runner *.qdrep *.nsys-rep *.sqlite
 	find . -name "*_runner" -delete
 	find . -name "*.nsys-rep" -delete
+	find . -name "*.ncu-rep" -delete
 	find . -name "*.sqlite" -delete
 	find . -name "*.log" -delete
 
@@ -68,7 +69,7 @@ sass:
 
 clean:
 	@if [ "$(MAKECMDGOALS)" = "clean" ]; then \
-		echo "Error: Usage 'make clean <id>'"; \
+		echo "Error: Usage 'make clean <id>' or 'make clean-all' for global clean"; \
 		exit 1; \
 	fi
 
@@ -81,18 +82,24 @@ clean:
 		exit 1; \
 	fi
 	@echo "Found directory: $(DIR)"
+	$(eval SRC := $(shell ls $(DIR)/*.cu 2>/dev/null | grep -v _runner.cu | head -n 1))
 	
 	@if [ "$(CLEAN)" = "1" ]; then \
 		echo "Cleaning $(DIR)..."; \
-		rm -f $(DIR)/*_runner $(DIR)/*.qdrep $(DIR)/*.nsys-rep $(DIR)/*.sqlite $(DIR)/*.log $(DIR)/*.ptx $(DIR)/*.sass $(DIR)/*.cubin; \
+		rm -f $(DIR)/*_runner $(DIR)/*.qdrep $(DIR)/*.nsys-rep $(DIR)/*.ncu-rep $(DIR)/*.sqlite $(DIR)/*.log $(DIR)/*.ptx $(DIR)/*.sass $(DIR)/*.cubin; \
 	elif [ "$(PTX)" = "1" ] || [ "$(SASS)" = "1" ]; then \
+		if [ -z "$(SRC)" ]; then \
+			echo "Error: No source file found in $(DIR)"; \
+			exit 1; \
+		fi; \
+		echo "Source file: $(SRC)"; \
 		if [ "$(PTX)" = "1" ]; then \
-			echo "Generating PTX for $(DIR)..."; \
-			$(NVCC) $(NVCC_FLAGS) -ptx $(DIR)/*.cu -o $(DIR)/$@.ptx; \
+			echo "Generating PTX for $(SRC)..."; \
+			$(NVCC) $(NVCC_FLAGS) -ptx $(SRC) -o $(DIR)/$@.ptx; \
 		fi; \
 		if [ "$(SASS)" = "1" ]; then \
-			echo "Generating SASS for $(DIR)..."; \
-			$(NVCC) $(NVCC_FLAGS) -cubin $(DIR)/*.cu -o $(DIR)/$@.cubin; \
+			echo "Generating SASS for $(SRC)..."; \
+			$(NVCC) $(NVCC_FLAGS) -cubin $(SRC) -o $(DIR)/$@.cubin; \
 			cuobjdump -sass $(DIR)/$@.cubin > $(DIR)/$@.sass; \
 			rm -f $(DIR)/$@.cubin; \
 		fi; \
