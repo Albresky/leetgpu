@@ -49,11 +49,11 @@ int main(int argc, char **argv) {
     double gflops = (double)flops / (avg_time * 1e-3) / 1e9; // GFLOPS
 
     printf("\nPerformance Metrics:\n");
-    printf("  Avg Latency: %.4f ms\n", avg_time);
-    printf("  Min Latency: %.4f ms\n", min_time);
-    printf("  Max Latency: %.4f ms\n", max_time);
-    printf("  Throughput:  %.4f GB/s\n", mem_bandwidth);
-    printf("  Compute:     %.4f GFLOPS\n", gflops);
+    printf("  Avg Latency:    %-10.4f ms\n", avg_time);
+    printf("  Min Latency:    %-10.4f ms\n", min_time);
+    printf("  Max Latency:    %-10.4f ms\n", max_time);
+    printf("  Mem Bandwidth:  %-10.4f GB/s\n", mem_bandwidth);
+    printf("  Throughput:     %-10.4f GFLOPS\n", gflops);
     printf("\n");
 
     CHECK(cudaEventDestroy(start));
