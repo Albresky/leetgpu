@@ -63,15 +63,16 @@ int main(int argc, char **argv) {
     CHECK(cudaMemcpy(d_A, h_A, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice));
 
+    constexpr int WARMUP_ITER = 5;
+    constexpr int TEST_ITER = 20;
     // Warmup
     printf("Warming up...\n");
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < WARMUP_ITER; ++i) {
         solve(d_A, d_B, d_C, N);
     }
     CHECK(cudaDeviceSynchronize());
 
     // Benchmark
-    int test_iter = 20;
     cudaEvent_t start, stop;
     CHECK(cudaEventCreate(&start));
     CHECK(cudaEventCreate(&stop));
@@ -80,9 +81,9 @@ int main(int argc, char **argv) {
     float min_time = 1e9f;
     float max_time = 0.0f;
 
-    printf("Running benchmark (%d iterations)...\n", test_iter);
+    printf("Running benchmark (%d iterations)...\n", TEST_ITER);
 
-    for (int i = 0; i < test_iter; ++i) {
+    for (int i = 0; i < TEST_ITER; ++i) {
         float milliseconds = 0;
         CHECK(cudaEventRecord(start));
         solve(d_A, d_B, d_C, N);
@@ -95,7 +96,7 @@ int main(int argc, char **argv) {
         if (milliseconds > max_time) max_time = milliseconds;
     }
 
-    float avg_time = total_time / test_iter;
+    float avg_time = total_time / TEST_ITER;
     
     // Metrics
     // Vector Add: Read A, Read B, Write C -> 3 * N * 4 bytes
