@@ -1,3 +1,5 @@
+# Vector Addition
+
 ### 编译
 
 vecadd 算子太简单，`-O0` 禁用编译器优化后体现不同kernel实现的性能差异。
@@ -16,5 +18,13 @@ vecadd 算子太简单，`-O0` 禁用编译器优化后体现不同kernel实现�
 ### 分析
 
 **性能无提升，略有波动。**
+
+- K0 Profiling Result:
+![](./ncu_k0.png)
+
+- K4 Profiling Result:
+![](./ncu_k4.png)
+
+
 
 典型的 memory bound 算子，data 复用率极低，每个elem只访问一次。从profiling结果可以看出，向量化访存kernel（K2,K3,K4）在G2S和S2G时有略微提升。
