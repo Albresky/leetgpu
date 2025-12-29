@@ -11,6 +11,8 @@ Matrix sizes
 
 ### 性能数据对比
 
+- RTX 4090 (Ada Lovelace)
+
 | Kernel Version | Avg Latency (ms) | Memory Bandwidth (GB/s) | Compute (GFLOPS) |
 | :--- | :--- | :--- | :--- |
 | **Naive (__K0)** | 0.4397 | 28.4940 |  4862.9793 |
