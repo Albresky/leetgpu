@@ -63,7 +63,7 @@ public:
         printf("Verifying result on CPU...\n");
         // Compute reference on CPU
         // C = A * B^T
-        // C[m][k] = sum(A[m][n] * B[k][n])
+        // C[m][k] = sum(A[m][n] * B[n][k])
         for (int m = 0; m < M; ++m) {
             for (int k = 0; k < K; ++k) {
                 float sum = 0.0f;
@@ -76,22 +76,19 @@ public:
 
         // Verify
         double epsilon = 1.0E-2; // Relaxed tolerance for matmul accumulation
-        bool match = true;
+        unsigned long long errs = 0;
         for (int i = 0; i < M * K; i++) {
-            if (std::abs(hostRef[i] - h_C[i]) > epsilon) {
-                match = false;
-                printf("Test FAIL!\n");
-                printf("host %5.4f gpu %5.4f at index %d\n", hostRef[i], h_C[i], i);
-                break;
-            }
+          if (std::abs(hostRef[i] - h_C[i]) > epsilon)
+            ++errs;
         }
-        if (match) printf("Test PASS!\n\n");
+        if (errs)
+          printf("Test FAIL! Errors = %llu/%ld, result[0][0]=%.5f\n\n", errs, ((long)M) * K, h_C[0]);
+        else
+          printf("Test PASS!\n\n");
     }
 
     long long get_bytes() override {
-        // Read A (MxN), Read B (KxN), Write C (MxK)
-        // Note: This is "perfect" bandwidth. Actual bandwidth might be higher due to re-reads.
-        return (long long)(M * N + K * N + M * K) * sizeof(float);
+        return (long long)(M * N + N * K + M * K) * sizeof(float);
     }
 
     long long get_flops() override {
