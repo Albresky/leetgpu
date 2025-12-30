@@ -16,3 +16,4 @@ Matrix sizes
 | Kernel Version | Avg Latency (ms) | Memory Bandwidth (GB/s) | Compute (GFLOPS) |
 | :--- | :--- | :--- | :--- |
 | **Naive (__K0)** | 3.4611 | 620.4692 | 0 |
+| **Using Smem for output memory coalescing (__K1)** | 2.6678 | 804.9523 | 0 |
