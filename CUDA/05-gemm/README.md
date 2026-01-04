@@ -15,6 +15,8 @@ Matrix sizes
 
 | Kernel Version | Avg Latency (ms) | Memory Bandwidth (GB/s) | Compute (GFLOPS) |
 | :--- | :--- | :--- | :--- |
-| **(__K0) Naive** | 0.4395 | 14.3154 | 4886.3127 |
+| **(__K0) Naive** | 0.4487 | 14.0210 | 4785.8499 |
+| **(__K1) Using SMEM** | 0.3421 | 18.3898 | 6277.0476 |
+| **(__K2) Using GemmPerThread + SMEM** | 0.0906 | 69.4225 | 23696.218 |
 
 
