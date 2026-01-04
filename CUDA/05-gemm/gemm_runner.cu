@@ -16,10 +16,10 @@ private:
     half *d_A, *d_B, *d_C;
 
 public:
-    GEMMProblem() : M(1024), N(1024), K(1024), alpha(1.0), beta(1.0) {
-        size_A = M * N * sizeof(__half);
-        size_B = N * K * sizeof(__half);
-        size_C = M * K * sizeof(__half);
+    GEMMProblem() : M(1024), K(1024), N(1024), alpha(1.0), beta(1.0) {
+        size_A = M * K * sizeof(__half);
+        size_B = K * N * sizeof(__half);
+        size_C = M * N * sizeof(__half);
     }
 
     ~GEMMProblem() {
@@ -42,8 +42,8 @@ public:
         hostRef = (__half *)malloc(size_C);
 
         // Initialize data with random values
-        for (int i = 0; i < M * N; i++) h_A[i] = static_cast<__half>(rand()) / (__half)RAND_MAX;
-        for (int i = 0; i < N * K; i++) h_B[i] = static_cast<__half>(rand()) / (__half)RAND_MAX;
+        for (int i = 0; i < M * K; i++) h_A[i] = static_cast<__half>(rand()) / (__half)RAND_MAX;
+        for (int i = 0; i < K * N; i++) h_B[i] = static_cast<__half>(rand()) / (__half)RAND_MAX;
 
         // Allocate device memory
         CHECK(cudaMalloc((void **)&d_A, size_A));
@@ -65,22 +65,23 @@ public:
 
         printf("Verifying result on CPU...\n");
         // Compute reference on CPU
-        // C = A * B^T
-        // C[m][k] = sum(A[m][n] * B[n][k])
+        // C = alpha * A * B + beta * C
         for (int m = 0; m < M; ++m) {
+          for (int n = 0; n < N; ++n) {
+            float sum = 0.0f;
             for (int k = 0; k < K; ++k) {
-                __half sum = 0.0f;
-                for (int n = 0; n < N; ++n) {
-                    sum += h_A[m * N + n] * h_B[n * K + k]; // row-major for both A and B
-                }
-                hostRef[m * K + k] = sum;
+              sum += (float)h_A[m * K + k] * (float)h_B[k * N + n];  // row-major for both A and B
             }
+            float c            = hostRef[m * N + n];
+            c                  = alpha * sum + beta * c;
+            hostRef[m * N + n] = (__half)c;
+          }
         }
 
         // Verify
         double epsilon = 1.0E-2; // Relaxed tolerance for matmul accumulation
         unsigned long long errs = 0;
-        for (int i = 0; i < M * K; i++) {
+        for (int i = 0; i < M * N; i++) {
           if (std::abs(__half2float(hostRef[i] - h_C[i])) > epsilon)
             ++errs;
         }
@@ -91,7 +92,7 @@ public:
     }
 
     long long get_bytes() override {
-        return (long long)(M * N + N * K + M * K) * sizeof(__half);
+        return (long long)(M * K + K * N + M * N) * sizeof(__half);
     }
 
     long long get_flops() override {
