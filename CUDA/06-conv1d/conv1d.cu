@@ -11,7 +11,6 @@ __global__ void convolution_1d_kernel(
   for (int i = 0; i < kernel_size; ++i) {
     sum += input[idx+i] * kernel[i];
   }
-  __syncthreads();
   output[idx] = sum;
 }
 
