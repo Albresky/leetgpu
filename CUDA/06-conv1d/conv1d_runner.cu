@@ -14,7 +14,7 @@ class Conv1DProblem : public Problem {
   float *d_i, *d_o, *d_k;
 
  public:
-  Conv1DProblem() : input_size(6), kernel_size(3)
+  Conv1DProblem() : input_size(8192), kernel_size(1024)
   {
     output_size = input_size - kernel_size + 1;
     size_i      = input_size * sizeof(float);
