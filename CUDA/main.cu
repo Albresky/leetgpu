@@ -49,6 +49,7 @@ int main(int argc, char **argv) {
     double gflops = (double)flops / (avg_time * 1e-3) / 1e9; // GFLOPS
 
     printf("\nPerformance Metrics:\n");
+    printf("  Total Time:     %-10.4f ms\n", total_time);
     printf("  Avg Latency:    %-10.4f ms\n", avg_time);
     printf("  Min Latency:    %-10.4f ms\n", min_time);
     printf("  Max Latency:    %-10.4f ms\n", max_time);
