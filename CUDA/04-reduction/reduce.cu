@@ -1,6 +1,7 @@
 #include <cuda_runtime.h>
+#include<iostream>
 
-#define __K2
+#define __K3
 
 /* 0. naive impl */
 /**
@@ -80,6 +81,59 @@ __global__ void reduce_kernel(const float *input, float *output, int N) {
 }
 #endif
 
+/* 3. two-stage reduction with single atomicAdd */
+#ifdef __K3
+__global__ void reduce_stage1(const float *input, float *partials, int N) {
+  extern __shared__ float smem[];
+
+  int tid = threadIdx.x;
+  int gid = blockIdx.x * blockDim.x + tid;
+  int stride = blockDim.x * gridDim.x;
+
+  float sum = 0.0f;
+  for (int i = gid; i < N; i += stride) {
+    sum += input[i];
+  }
+  smem[tid] = sum;
+  __syncthreads();
+
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (tid < s) {
+      smem[tid] += smem[tid + s];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0) {
+    partials[blockIdx.x] = smem[0];
+  }
+}
+
+__global__ void reduce_stage2(const float *partials, float *output, int numPartials) {
+  extern __shared__ float smem[];
+
+  int tid = threadIdx.x;
+  float sum = 0.0f;
+
+  for (int i = tid; i < numPartials; i += blockDim.x) {
+    sum += partials[i];
+  }
+  smem[tid] = sum;
+  __syncthreads();
+
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (tid < s) {
+      smem[tid] += smem[tid + s];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0) {
+    atomicAdd(output, smem[0]);
+  }
+}
+#endif
+
 // input, output are device pointers
 extern "C" void solve(const float *input, float *output, int N) {
 #ifdef __K0
@@ -91,8 +145,23 @@ extern "C" void solve(const float *input, float *output, int N) {
 #elif defined(__K2)
   dim3 threadsPerBlock(32);
   dim3 blocksPerGrid((N + 32 - 1) / 32);
+#elif defined(__K3)
+  dim3 threadsPerBlock(256);
+  dim3 blocksPerGrid((N + threadsPerBlock.x - 1) / threadsPerBlock.x);
 #endif
   cudaMemset(output, 0, sizeof(float));
+#if defined(__K0) || defined(__K1) || defined(__K2)
   reduce_kernel<<<blocksPerGrid, threadsPerBlock>>>(input, output, N);
   cudaDeviceSynchronize();
+#elif defined(__K3)
+  float *partials = nullptr;
+  int numPartials = blocksPerGrid.x;
+  cudaMalloc(&partials, numPartials * sizeof(float));
+  reduce_stage1<<<blocksPerGrid, threadsPerBlock, threadsPerBlock.x * sizeof(float)>>>(
+      input, partials, N);
+  reduce_stage2<<<1, threadsPerBlock, threadsPerBlock.x * sizeof(float)>>>(
+      partials, output, numPartials);
+  cudaDeviceSynchronize();
+  cudaFree(partials);
+#endif
 }
