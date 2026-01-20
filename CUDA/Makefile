@@ -2,7 +2,9 @@ SHELL := /bin/bash
 NVCC := nvcc
 
 # arch: sm_89 for RTX 4090 (Ada Lovelance)
-NVCC_FLAGS := -O0 -arch=sm_89 --std=c++17
+ARCH := 89
+NVCC_FLAGS := -O0 -arch=sm_$(ARCH) --std=c++17
+NVCC_DUMP_FLAGS := -O0 --std=c++17
 
 TIMESTAMP := $(shell date +%Y%m%d_%H%M%S)
 
@@ -16,6 +18,7 @@ help:
 	@echo "Usage:"
 	@echo "  make <id>        Build and run the problem with the given ID (e.g., make 01)"
 	@echo "  make bench <id>  Build and run with Nsight Systems profiling (e.g., make bench 01)"
+	@echo "  make ncu <id>	  Build and run with Nsight Compute profiling (e.g., make ncu 01)"
 	@echo "  make ptx <id>    Generate PTX assembly (e.g., make ptx 01)"
 	@echo "  make sass <id>   Generate SASS assembly (e.g., make sass 01)"
 
@@ -31,6 +34,11 @@ clean-all:
 # Check if 'bench' is in the command line args
 ifneq ($(filter bench,$(MAKECMDGOALS)),)
 BENCH := 1
+endif
+
+# Check if 'ncu' is in the command line args
+ifneq ($(filter ncu,$(MAKECMDGOALS)),)
+NCU := 1
 endif
 
 # Check if 'ptx' is in the command line args
@@ -52,6 +60,12 @@ endif
 bench:
 	@if [ "$(MAKECMDGOALS)" = "bench" ]; then \
 		echo "Error: Usage 'make bench <id>'"; \
+		exit 1; \
+	fi
+
+ncu:
+	@if [ "$(MAKECMDGOALS)" = "ncu" ]; then \
+		echo "Error: Usage 'make ncu <id>'"; \
 		exit 1; \
 	fi
 
@@ -95,11 +109,11 @@ clean:
 		echo "Source file: $(SRC)"; \
 		if [ "$(PTX)" = "1" ]; then \
 			echo "Generating PTX for $(SRC)..."; \
-			$(NVCC) $(NVCC_FLAGS) -ptx $(SRC) -o $(DIR)/$@.ptx; \
+			$(NVCC) $(NVCC_DUMP_FLAGS) -arch=compute_$(ARCH) -ptx $(SRC) -o $(DIR)/$@.ptx; \
 		fi; \
 		if [ "$(SASS)" = "1" ]; then \
 			echo "Generating SASS for $(SRC)..."; \
-			$(NVCC) $(NVCC_FLAGS) -cubin $(SRC) -o $(DIR)/$@.cubin; \
+			$(NVCC) $(NVCC_DUMP_FLAGS) -gencode arch=compute_$(ARCH),code=sm_$(ARCH) -cubin $(SRC) -o $(DIR)/$@.cubin; \
 			cuobjdump -sass $(DIR)/$@.cubin > $(DIR)/$@.sass; \
 			rm -f $(DIR)/$@.cubin; \
 		fi; \
@@ -109,6 +123,10 @@ clean:
 		if [ "$(BENCH)" = "1" ]; then \
 			echo "Running benchmark (nsys)..."; \
 			nsys profile --stats=true --force-overwrite=true -o $(DIR)/$@_report $(DIR)/$@_runner 2>&1 | tee $(DIR)/benchmark_$(TIMESTAMP).log; \
+		elif [ "$(NCU)" = "1" ]; then \
+			echo "Running benchmark (ncu)..."; \
+			ncu --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum,smsp__sass_inst_executed_op_shared_ld.sum,smsp__sass_inst_executed_op_shared_st.sum,l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum,smsp__inst_executed.sum,dram__throughput.avg_pct_of_peak_sustained_elapsed \
+				$(DIR)/$@_runner 2>&1 | tee $(DIR)/ncu_$(TIMESTAMP).log; \
 		else \
 			echo "Running..."; \
 			$(DIR)/$@_runner 2>&1 | tee $(DIR)/run_$(TIMESTAMP).log; \
