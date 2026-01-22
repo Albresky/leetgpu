@@ -1,8 +1,9 @@
 .vscode/
 *.sqlite
 *.nsys-rep
-
+*.ncu-rep
 *.ptx
 *.sass
 *_runner
 *.log
+*.csv
