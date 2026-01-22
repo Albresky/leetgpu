@@ -6,7 +6,7 @@
 //////////////////////////////////////////////////////////////////
 __global__ void block_max_kernel(const float* input, float* bmax, int N)
 {
-  __shared__ float s_input[2048];
+  __shared__ float s_input[256];
 
   int gidx      = blockIdx.x * blockDim.x + threadIdx.x;
   int tidx      = threadIdx.x;
@@ -45,7 +45,7 @@ __global__ void reduce_bmax_kernel(const float* bmax, float* out_max, int n)
 
 __global__ void block_sum_kernel(const float* input, const float* max_val, float* bsum, int N)
 {
-  __shared__ float s_input[2048];
+  __shared__ float s_input[256];
 
   int gidx      = blockIdx.x * blockDim.x + threadIdx.x;
   int tidx      = threadIdx.x;
@@ -85,7 +85,7 @@ __global__ void reduce_bsum_kernel(const float* bsum, float* out_sum, int n)
 __global__ void softmax_kernel(
   const float* input, float* output, int N, const float* max_val, const float* sum_val)
 {
-  __shared__ float s_input[2048];
+  __shared__ float s_input[256];
 
   int gidx = blockIdx.x * blockDim.x + threadIdx.x;
   int tidx = threadIdx.x;
@@ -115,10 +115,16 @@ extern "C" void solve(const float* input, float* output, int N)
   cudaMalloc(&d_bsum, blocksPerGrid * sizeof(float));
   cudaMalloc(&d_sum, sizeof(float));
 
+  // 1. find the max value in each block: 1-thread --> 1--elem
   block_max_kernel<<<blocksPerGrid, threadsPerBlock>>>(input, d_bmax, N);
+  // 2. find the max value from the max values of all blocks: 1-thread --> 1+ elem
   reduce_bmax_kernel<<<1, threadsPerBlock, threadsPerBlock * sizeof(float)>>>(
     d_bmax, d_max, blocksPerGrid);
+
+  // Same logics as findmax
+  // 3. compute sum for all values in each block: 1-thread --> 1--elem
   block_sum_kernel<<<blocksPerGrid, threadsPerBlock>>>(input, d_max, d_bsum, N);
+  // 4. compute sum for all the sums from all blocks: 1-thread --> 1+ elem
   reduce_bsum_kernel<<<1, threadsPerBlock, threadsPerBlock * sizeof(float)>>>(
     d_bsum, d_sum, blocksPerGrid);
 
