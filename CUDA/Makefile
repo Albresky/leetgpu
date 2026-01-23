@@ -119,15 +119,17 @@ clean:
 		fi; \
 	else \
 		echo "Compiling..."; \
-		$(NVCC) $(NVCC_FLAGS) -o $(DIR)/$@_runner main.cu $(DIR)/*.cu; \
 		if [ "$(BENCH)" = "1" ]; then \
+			$(NVCC) $(NVCC_FLAGS) -D__NCU_ON__ -o $(DIR)/$@_runner main.cu $(DIR)/*.cu; \
 			echo "Running benchmark (nsys)..."; \
 			nsys profile --stats=true --force-overwrite=true -o $(DIR)/$@_report $(DIR)/$@_runner 2>&1 | tee $(DIR)/benchmark_$(TIMESTAMP).log; \
 		elif [ "$(NCU)" = "1" ]; then \
+			$(NVCC) $(NVCC_FLAGS) -D__NCU_ON__ -o $(DIR)/$@_runner main.cu $(DIR)/*.cu; \
 			echo "Running benchmark (ncu)..."; \
 			ncu --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum,smsp__sass_inst_executed_op_shared_ld.sum,smsp__sass_inst_executed_op_shared_st.sum,l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum,smsp__inst_executed.sum,dram__throughput.avg_pct_of_peak_sustained_elapsed \
 				$(DIR)/$@_runner 2>&1 | tee $(DIR)/ncu_$(TIMESTAMP).log; \
 		else \
+			$(NVCC) $(NVCC_FLAGS) -o $(DIR)/$@_runner main.cu $(DIR)/*.cu; \
 			echo "Running..."; \
 			$(DIR)/$@_runner 2>&1 | tee $(DIR)/run_$(TIMESTAMP).log; \
 		fi; \
