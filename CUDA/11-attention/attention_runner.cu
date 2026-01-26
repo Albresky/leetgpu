@@ -10,22 +10,23 @@ extern "C" void solve(
 class AttentionProblem : public Problem {
  private:
   int M, N, dk, dv, d;
-  int len_Q, len_K, len_V;
+  int len_Q, len_K, len_V, len_o;
   size_t size_Q, size_K, size_V, size_output;
   float *h_Q, *h_K, *h_V, *h_o, *h_golden;
   float *d_Q, *d_K, *d_V, *d_o;
 
  public:
-  AttentionProblem() : M(8192), N(16384), dk(512)
+  AttentionProblem() : M(1024), N(1024), dk(1024)
   {
     d = dv      = dk;  // supposing dv=dk=d
     len_Q       = M * dk;
     len_K       = N * dk;
     len_V       = N * dv;
+    len_o       = M * dv;
     size_Q      = len_Q * sizeof(float);
     size_K      = len_K * sizeof(float);
     size_V      = len_V * sizeof(float);
-    size_output = M * dv * sizeof(float);
+    size_output = len_o * sizeof(float);
   }
 
   ~AttentionProblem()
@@ -34,16 +35,16 @@ class AttentionProblem : public Problem {
     if (d_K) cudaFree(d_K);
     if (d_V) cudaFree(d_V);
     if (d_o) cudaFree(d_o);
-    if (h_Q) cudaFree(h_Q);
-    if (h_K) cudaFree(h_K);
-    if (h_V) cudaFree(h_V);
-    if (h_o) cudaFree(h_o);
+    if (h_Q) free(h_Q);
+    if (h_K) free(h_K);
+    if (h_V) free(h_V);
+    if (h_o) free(h_o);
     if (h_golden) free(h_golden);
   }
 
   void init() override
   {
-    printf("Attention params: Q(%d, %d), K(%d, %d), V(%d, %d)\n", M, dk, N, dk, N, dv);
+    printf("Init. Attention params: Q(%d, %d), K(%d, %d), V(%d, %d)\n", M, dk, N, dk, N, dv);
 
     // Allocate host memory
     h_Q      = (float*)malloc(size_Q);
@@ -53,11 +54,11 @@ class AttentionProblem : public Problem {
     h_golden = (float*)malloc(size_output);
 
     // Initialize data with random values
-    for (int i = 0; i < size_Q; i++)
+    for (int i = 0; i < len_Q; i++)
       h_Q[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
-    for (int i = 0; i < size_K; i++)
+    for (int i = 0; i < len_K; i++)
       h_K[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
-    for (int i = 0; i < size_V; i++)
+    for (int i = 0; i < len_V; i++)
       h_V[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 
     // Allocate device memory
@@ -72,14 +73,18 @@ class AttentionProblem : public Problem {
     CHECK(cudaMemcpy(d_V, h_V, size_V, cudaMemcpyHostToDevice));
   }
 
-  void run() override { solve(d_Q, d_K, d_V, d_o, M, N, d); }
+  void run() override
+  {
+    printf("run.\n");
+    solve(d_Q, d_K, d_V, d_o, M, N, d);
+  }
 
   void verify() override
   {
     // Copy result back to host
     CHECK(cudaMemcpy(h_o, d_o, size_output, cudaMemcpyDeviceToHost));
 
-    printf("Verifying result on CPU...\n");
+    printf("verify. Verifying result on CPU...\n");
 
     // Compute reference on CPU
     auto gemm =
@@ -90,7 +95,7 @@ class AttentionProblem : public Problem {
             for (int k = 0; k < dim_K; ++k) {
               sum += pa[m * dim_K + k] * pb[k * dim_N + n];
             }
-            pc[m * dim_N + n] = sum / std::sqrtf(scale);
+            pc[m * dim_N + n] = sum / std::sqrt(scale);
           }
         }
       };
@@ -128,12 +133,12 @@ class AttentionProblem : public Problem {
     // Verify
     double epsilon          = 1.0E-4;  // Relaxed tolerance for Attention accumulation
     unsigned long long errs = 0;
-    for (int i = 0; i < size_output; ++i) {
+    for (int i = 0; i < len_o; ++i) {
       if (std::abs(h_o[i] - h_golden[i]) > epsilon) ++errs;
       if (errs && errs < 10)
         printf("Test FAIL! Errors = %llu/%ld, result[%d]=%.5f, golden[%d]=%.5f\n\n",
                errs,
-               ((long)size_output),
+               ((long)len_o),
                i,
                h_o[i],
                i,
@@ -147,20 +152,40 @@ class AttentionProblem : public Problem {
 
   long long get_bytes() override
   {
-    const int threadsPerBlock = 256;
+    const int threadsPerBlock = 512;
     const int blocksPerGrid   = (N + threadsPerBlock - 1) / threadsPerBlock;
 
     long long bytes = 0;
+    // 1) S = Q * K^T
+    bytes += 1LL * len_Q * sizeof(float);  // Q read
+    bytes += 1LL * len_K * sizeof(float);  // K read
+    bytes += 1LL * len_o * sizeof(float);  // S write (M*N)
 
-    // TODO(albresky)
+    // 2) Softmax per row
+    bytes += 1LL * len_o * sizeof(float);              // S read (bmax/bsum)
+    bytes += 1LL * len_o * sizeof(float);              // S_norm write
+    bytes += 2LL * M * blocksPerGrid * sizeof(float);  // bmax + bsum
+    bytes += 2LL * M * sizeof(float);                  // max + sum
+
+    // 3) O = S_norm * V
+    bytes += 1LL * len_o * sizeof(float);  // S_norm read
+    bytes += 1LL * len_V * sizeof(float);  // V read
+    bytes += 1LL * len_o * sizeof(float);  // output write
+
     return bytes;
   }
 
   long long get_flops() override
   {
-    long long flops = 0;
+    // GEMM: 2*M*N*d (mul+add)
+    long long flops = 2LL * M * N * d;  // Q * K^T
+    flops += 2LL * M * N * d;           // S_norm * V
 
-    // TODO(albresky)
+    // Softmax: per element exp + sub + div, plus reductions
+    flops += 3LL * M * N;  // exp/sub/div per element
+    flops += 1LL * M * N;  // sum reduction (adds)
+    flops += 1LL * M * N;  // max reduction (comparisons)
+
     return flops;
   }
 };
