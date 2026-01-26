@@ -12,6 +12,7 @@ Implement the Scaled Dot-Product Attention function as described in the paper "*
 Given a query matrix $Q$ of size $M \times d_k$, a key matrix $K$ of size $N \times d_k$, and a value matrix $V$ of size $N \times d_v$, compute the output matrix $O$ of size $M \times d_v$.
 
 The mathematical formula is:
+
 $$
 Attention(Q, K, V) = softmax\left(\frac{QK^T}{\sqrt{d_k}}\right)V
 $$
