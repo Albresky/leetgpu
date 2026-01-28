@@ -11,8 +11,9 @@ __global__ void mm_kernel(const float* A,
                           const float dk = 1.0f)
 {
   // Tiled Matmul
-  // Note: C(M,N) = A(M, K) * B(K, N), differing from dims in 02-matmul.
-  // The Tile is square, this is the key to simplify thread usage.
+  // Note: C(M,N) = A(M, K) * B(K, N)
+  // Differing from dims in 02-matmul,
+  // the Tile is square, this is the key to simplify thread usage.
   // Each thread computes 1 C-elem.
   constexpr int Tile = TILE_SIZE;
   __shared__ float s_A[Tile][Tile];
@@ -39,6 +40,60 @@ __global__ void mm_kernel(const float* A,
     __syncthreads();
 
     // MM
+    for (int kk = 0; kk < Tile; ++kk) {
+      sum += s_A[tidy][kk] * s_B[kk][tidx];
+    }
+    __syncthreads();
+  }
+
+  if (gidy < M && gidx < N) C[gidy * N + gidx] = sum / dk;
+}
+
+template <int TILE_SIZE>
+__global__ void mm_transposed_kernel(const float* A,
+                                     const float* B,
+                                     float* C,
+                                     const int M,
+                                     const int N,
+                                     const int K,
+                                     const float dk = 1.0f)
+{
+  // Tiled Matmul with transposed B
+  // A: (M, K)
+  // B: (N, K)
+  // C: (M, N)
+  // Note: C(M,N) = A(M,K) * B^T(K,N)
+  constexpr int Tile = TILE_SIZE;
+  __shared__ float s_A[Tile][Tile];  // MTile x KTile
+  __shared__ float s_B[Tile][Tile];  // NTile x NTile
+
+  int gidx = blockIdx.x * blockDim.x + threadIdx.x;
+  int gidy = blockIdx.y * blockDim.y + threadIdx.y;
+  int tidx = threadIdx.x;
+  int tidy = threadIdx.y;
+
+  float sum = .0f;
+  for (int k = 0; k < (K + Tile - 1) / Tile; ++k) {
+    // G2S
+    // A
+    if (gidy < M && (k * Tile + tidx) < K)
+      s_A[tidy][tidx] = A[gidy * K + k * Tile + tidx];
+    else
+      s_A[tidy][tidx] = .0f;
+
+    // B
+    // load B^T
+    // bidx -->N, tidy < TileN, tidx --> dk
+    if (blockIdx.x * Tile + tidy < N && k * Tile + tidx < K)
+      s_B[tidx][tidy] = B[(blockIdx.x * Tile + tidy) * K + k * Tile + tidx];
+    else
+      s_B[tidx][tidy] = .0f;
+
+    __syncthreads();
+
+    // MM
+    // s_A[tidy][kk] -> A[m, k]
+    // s_B[kk][tidx] -> B^T[k, n]
     for (int kk = 0; kk < Tile; ++kk) {
       sum += s_A[tidy][kk] * s_B[kk][tidx];
     }
@@ -137,7 +192,7 @@ __global__ void norm_kernel(
 }
 
 extern "C" void solve(/* M*dk */ const float* Q,
-                      /* dk*N */ const float* K,
+                      /* N*dk */ const float* K,
                       /* N*dv */ const float* V,
                       /* M*dv */ float* output,
                       const int M,
@@ -152,11 +207,11 @@ extern "C" void solve(/* M*dk */ const float* Q,
   float* S_norm = nullptr;
   cudaMalloc(&S, M * N * sizeof(float));
   cudaMalloc(&S_norm, M * N * sizeof(float));
+
   // compute S = Q * K^T, scaled with sqrt(dk)
-  mm_kernel<TILE_SIZE><<<blockPerGrid, threadBlock>>>(Q, K, S, M, N, d, sqrtf(d));
+  mm_transposed_kernel<TILE_SIZE><<<blockPerGrid, threadBlock>>>(Q, K, S, M, N, d, sqrtf(d));
 
   // compute softmax(S)
-
   dim3 norm_threadBlock(512);
   dim3 norm_blockPerGrid((N + norm_threadBlock.x - 1) / norm_threadBlock.x, M);
   float* bmax = nullptr;
@@ -177,7 +232,10 @@ extern "C" void solve(/* M*dk */ const float* Q,
   sum_kernel<<<M, norm_threadBlock, norm_threadBlock.x * sizeof(float)>>>(
     bsum, sum, norm_blockPerGrid.x);
   norm_kernel<<<norm_blockPerGrid, norm_threadBlock>>>(S, S_norm, max, sum, N);
-  mm_kernel<TILE_SIZE><<<blockPerGrid, threadBlock>>>(S_norm, V, output, M, d, N);
+
+  dim3 blockPerGrid_out((d + threadBlock.x - 1) / threadBlock.x,
+                        (M + threadBlock.y - 1) / threadBlock.y);
+  mm_kernel<TILE_SIZE><<<blockPerGrid_out, threadBlock>>>(S_norm, V, output, M, d, N);
 
   cudaFree(bmax);
   cudaFree(max);

@@ -87,26 +87,42 @@ class AttentionProblem : public Problem {
     printf("verify. Verifying result on CPU...\n");
 
     // Compute reference on CPU
-    auto gemm =
-      [](float* pa, float* pb, float* pc, int dim_M, int dim_N, int dim_K, float scale = 1.0) {
-        for (int m = 0; m < dim_M; ++m) {
-          for (int n = 0; n < dim_N; ++n) {
-            float sum = .0f;
-            for (int k = 0; k < dim_K; ++k) {
-              sum += pa[m * dim_K + k] * pb[k * dim_N + n];
-            }
-            pc[m * dim_N + n] = sum / std::sqrt(scale);
+    auto gemm = [](float* pa,
+                   float* pb,
+                   float* pc,
+                   int dim_M,
+                   int dim_N,
+                   int dim_K,
+                   const bool transb = false,
+                   float scale       = 1.0) {
+      for (int m = 0; m < dim_M; ++m) {
+        for (int n = 0; n < dim_N; ++n) {
+          float sum = .0f;
+          for (int k = 0; k < dim_K; ++k) {
+            sum += pa[m * dim_K + k] * pb[transb ? n * dim_K + k : k * dim_N + n];
           }
+          pc[m * dim_N + n] = sum / std::sqrt(scale);
         }
-      };
+      }
+    };
 
     // 1. compute S = Q * K^T
-    float* S = (float*)malloc(size_output);
-    // scale S by factor sqrt(d_k)
-    gemm(h_Q, h_K, S, M, dk, N, dk);
+    // Q: M x d, K: N x d
+    // S: M x N
+    float* S = (float*)malloc(M * N * sizeof(float));
+    gemm(h_Q, h_K, S, M, dk, N, true, dk);
+    // for (int m = 0; m < M; ++m) {
+    //   for (int n = 0; n < N; ++n) {
+    //     float val = 0.0f;
+    //     for (int k = 0; k < d; ++k) {
+    //       val += h_Q[m * d + k] * h_K[n * d + k];
+    //     }
+    //     S[m * N + n] = val / sqrtf((float)d);
+    //   }
+    // }
 
     // 2. compute softmax(S), by row-wise
-    float* S_norm = (float*)malloc(size_output);  // normalized S
+    float* S_norm = (float*)malloc(M * N * sizeof(float));
     for (int m = 0; m < M; ++m) {
       float* pS      = S + m * N;
       float* pS_norm = S_norm + m * N;
@@ -127,8 +143,19 @@ class AttentionProblem : public Problem {
     }
 
     // 3. compute weighted sum with V
-    gemm(S_norm, h_V, h_golden, M, N, dv);
-    // end golden compute
+    // S_norm: M x N
+    // V: N x dv
+    // h_golden: M x dv
+    gemm(S_norm, h_V, h_golden, M, N, dv, false);
+    // for (int m = 0; m < M; ++m) {
+    //   for (int i = 0; i < dv; ++i) {
+    //     float val = 0.0f;
+    //     for (int k = 0; k < N; ++k) {
+    //       val += S_norm[m * N + k] * h_V[k * dv + i];
+    //     }
+    //     h_golden[m * dv + i] = val;
+    //   }
+    // }
 
     // Verify
     double epsilon          = 1.0E-4;  // Relaxed tolerance for Attention accumulation
@@ -148,6 +175,10 @@ class AttentionProblem : public Problem {
       printf("Test FAIL! Errors = %llu/%ld\n\n", errs, ((long)size_output));
     else
       printf("Test PASS!\n\n");
+
+    // Free temp
+    free(S);
+    free(S_norm);
   }
 
   long long get_bytes() override

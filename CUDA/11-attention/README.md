@@ -1,4 +1,4 @@
-# Scaled Dot-Product Attention
+# Softmax Attention (Scaled Dot-Product Attention)
 
 ## Problem
 
@@ -54,13 +54,13 @@ void solve(float* Q, float* K, float* V, float* output, int M, int N, int d);
 
 | Kernel Version | Avg Latency (ms) | Memory Bandwidth (GB/s) | Throughput (GFLOPS) |
 | :--- | :--- | :--- | :--- |
-| **__K0** | 3.0206 | 11.1167 | 1423.6301 |
+| **__K0** | 1.9342 | 17.3604 | 2223.2113 |
 
 
 ## Naive
 
 ```bash
-void mm_kernel<16>(const float *, const float *, float *, int, int, int, float) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void mm_kernel<16>(const float *, const float *, float *, int, int, int, float) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: Command line profiler metrics
     -------------------------------------------------------- ----------- ------------
     Metric Name                                              Metric Unit Metric Value
@@ -70,6 +70,20 @@ void mm_kernel<16>(const float *, const float *, float *, int, int, int, float) 
     l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum                sector   16,777,216
     l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum                sector      131,072
     smsp__inst_executed.sum                                         inst  129,400,832
+    smsp__sass_inst_executed_op_shared_ld.sum                       inst   41,943,040
+    smsp__sass_inst_executed_op_shared_st.sum                       inst    4,194,304
+    -------------------------------------------------------- ----------- ------------
+    
+  void mm_transposed_kernel<16>(const float *, const float *, float *, int, int, int, float) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: Command line profiler metrics
+    -------------------------------------------------------- ----------- ------------
+    Metric Name                                              Metric Unit Metric Value
+    -------------------------------------------------------- ----------- ------------
+    dram__throughput.avg_pct_of_peak_sustained_elapsed                        (!) n/a
+    l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum                        0
+    l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum                sector   16,777,216
+    l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum                sector      131,072
+    smsp__inst_executed.sum                                         inst  121,110,528
     smsp__sass_inst_executed_op_shared_ld.sum                       inst   41,943,040
     smsp__sass_inst_executed_op_shared_st.sum                       inst    4,194,304
     -------------------------------------------------------- ----------- ------------
@@ -142,19 +156,5 @@ void mm_kernel<16>(const float *, const float *, float *, int, int, int, float) 
     smsp__inst_executed.sum                                         inst    1,343,488
     smsp__sass_inst_executed_op_shared_ld.sum                       inst            0
     smsp__sass_inst_executed_op_shared_st.sum                       inst            0
-    -------------------------------------------------------- ----------- ------------
-
-  void mm_kernel<16>(const float *, const float *, float *, int, int, int, float) (64, 64, 1)x(16, 16, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: Command line profiler metrics
-    -------------------------------------------------------- ----------- ------------
-    Metric Name                                              Metric Unit Metric Value
-    -------------------------------------------------------- ----------- ------------
-    dram__throughput.avg_pct_of_peak_sustained_elapsed                        (!) n/a
-    l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum                        0
-    l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum                sector   16,777,216
-    l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum                sector      131,072
-    smsp__inst_executed.sum                                         inst  129,400,832
-    smsp__sass_inst_executed_op_shared_ld.sum                       inst   41,943,040
-    smsp__sass_inst_executed_op_shared_st.sum                       inst    4,194,304
     -------------------------------------------------------- ----------- ------------
 ```
