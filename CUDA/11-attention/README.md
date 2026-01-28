@@ -2,12 +2,12 @@
 
 ## Problem
 
-**Title:** Scaled Dot-Product Attention (Naive)
+**Title:** Softmax Attention (Scaled Dot-Product Attention)
 
 **Difficulty:** Medium
 
 **Description:**
-Implement the Scaled Dot-Product Attention function as described in the paper "*Attention Is All You Need*".
+Implement the Scaled Dot-Product Attention function as described in the paper "*[Attention Is All You Need - 2017](https://arxiv.org/abs/1706.03762)*".
 
 Given a query matrix $Q$ of size $M \times d_k$, a key matrix $K$ of size $N \times d_k$, and a value matrix $V$ of size $N \times d_v$, compute the output matrix $O$ of size $M \times d_v$.
 
@@ -46,7 +46,7 @@ void solve(float* Q, float* K, float* V, float* output, int M, int N, int d);
 
 本质就是执行 $M$ 次独立的 1D Softmax($S_i$) 操作，求得 $S_{M \times N}= Q \times K^T$ 每一行的概率分布；再乘以 $V$， 对 $d_v$ 维度的每个向量进行加权求和。
 
-### 关于 $C(M,N) = A(M, K) \times B^T(N, K)$ 的线程索引
+### 关于 $C_{M \times N} = A_{M \times K} \times B_{N \times K}^T$ 的线程索引
 
 在 `__global__ void mm_transposed_kernel()` 设备函数中，我们对B矩阵的加载，在 Grid 和 ThreadBlock 层面是 X、Y轴 **交错** 的。
 
@@ -66,7 +66,7 @@ else
 
 
 $$
-{GMEM_{rowIdx(Dim_N)}} = \underbrace{\text{blockIdx.x} \times \text{Tile}}_{\text{Grid X}} + \underbrace{\text{threadIdx.y}}_{\text{Block Y}}
+{GMEM_{rowIdx(Dim_N)}} = \underbrace{\text{blockIdx.x} \times \text{NTile}}_{\text{Grid X}} + \underbrace{\text{threadIdx.y}}_{\text{Block Y}}
 $$
 
 1. **数据的物理布局**：
@@ -85,9 +85,9 @@ $$
         *   那么剩下的那个维度（$N$ 维度），就只能交给 `threadIdx.y` 索引
 
 4.  **结果**：
-    *   **Grid 层**：`blockIdx.x` 决定处理哪几行（$N$ 维度）
-    *   **Block 内**：`threadIdx.y` 决定当前线程负责这几行里的哪一行（$N$ 维度偏移）
-    *   **Block 内**：`threadIdx.x` 决定当前线程读取该行的哪一列（$K$ 维度）
+    *   **Grid 层**：`blockIdx.x` 决定处理哪几行（ $N$ 维度 ）
+    *   **Block 内**：`threadIdx.y` 决定当前线程负责这几行里的哪一行（ $N$ 维度偏移 ）
+    *   **Block 内**：`threadIdx.x` 决定当前线程读取该行的哪一列（ $K$ 维度 ）
 
 
 ## 性能数据对比
