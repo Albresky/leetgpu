@@ -42,13 +42,80 @@ $$
 void solve(float* Q, float* K, float* V, float* output, int M, int N, int d);
 ```
 
+## 简介
+
+> 网上关于 self-attention 看到很多代名词：Softmax Attention，Self-Attention，Scaled Dot-Product Attention，但其数学本质一样。这里纪要这些命名区别。
+
+**这三者分别描述了同一个机制的不同维度：**
+
+* **Self-Attention：** 描述**应用场景**（数据的来源）。指 Q、K、V 三个矩阵均来自**同一个输入源**
+* **Scaled Dot-Product Attention：** 描述**具体数学实现**。指通过点积计算相似度，并除以缩放因子  的方法。
+* **Softmax Attention：** 描述**归一化方式**。指使用 *Softmax* 函数将得分为概率分布。在 Transformer 的语境下，它通常等同于 Scaled Dot-Product Attention。
+
+简言之：**我们通常使用“Scaled Dot-Product Attention”这个数学公式，来实现“Self-Attention”这一功能模块。**
+
+---
+
+### 原理
+
+为清晰区分，我们需要从 **数据流向（Flow）** 和 **计算内核（Kernel）** 两个角度拆解：
+
+#### 1. Self-Attention 描述“数据从哪来”
+
+这是架构层面的定义。核心特征在于 **Q, K, V 同源**。
+
+* **定义：** 输入序列  经过三个不同的线性变换矩阵 ($W_Q, W_K, W_V$) 分别得到 $Q, K, V$。即 $Q = XW_Q, K = XW_K, V = XW_V$ 。
+* **意义：** 让序列中的每一个元素都能看到序列中的其他所有元素，从而捕捉序列内部的依赖关系。
+* **对比：** 如果 $Q$ 来自解码器， $K, V$ 来自编码器，那便是 **Cross-Attention（交叉注意力）**，而非 Self-Attention。
+
+#### 2. Scaled Dot-Product Attention 描述“内部怎么算”
+
+这是数学层面的定义，对应你图片中的公式逻辑（图片中省略了 Scale）。
+
+* **定义：** 这是一个函数 $f(Q, K, V)$:
+
+$$
+f(Q, K, V) = softmax\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+$$
+
+**其计算步骤如下**：
+
+  - 1. **Dot-Product** 计算相似度矩阵: $S = QK^T$ （点积）
+
+  - 2. **Scaled** 缩放： $S' = \frac{S}{\sqrt{d_k}}$ （除以维度的平方根）
+
+  - 3. **Softmax** 归一化： $P = softmax(S')$ （Softmax）, 将每一行转为概率分布
+
+  - 4. **Weighted Sum** 加权求和： $O = PV$ （乘以 V 得到输出）
+
+
+#### 3. Softmax Attention (描述“特性”)
+
+这是一个更宽泛的分类词。
+
+* **定义：** 任何使用 Softmax 作为归一化算子的注意力机制。
+* **联系：** 因为 Scaled Dot-Product Attention 的核心步骤是 Softmax，所以它属于 Softmax Attention 的一种。与之相对的是 Linear Attention 或 Sparse Attention（使用 ReLU 或其他稀疏化算子代替 Softmax）。
+
+---
+
+### 结构化对比
+
+总结如下表；
+
+| 术语 | 关注点 | 特征 |
+| --- |  --- | --- |
+| **Self-Attention** | **Who** | 输入  均源自同一序列 $X$ |
+| **Scaled Dot-Product** | **How** | 使用  $QK^T$点积 +  $\frac{1}{\sqrt{d_k}}$缩放 + Softmax |
+| **Softmax Attention** | **Normalization** | 使用 Softmax 函数将 Score 转为概率分布 |
+
+
 ## 思路
 
 本质就是执行 $M$ 次独立的 1D Softmax($S_i$) 操作，求得 $S_{M \times N}= Q \times K^T$ 每一行的概率分布；再乘以 $V$， 对 $d_v$ 维度的每个向量进行加权求和。
 
 ### 关于 $C_{M \times N} = A_{M \times K} \times B_{N \times K}^T$ 的线程索引
 
-在 `__global__ void mm_transposed_kernel()` 设备函数中，我们对B矩阵的加载，在 Grid 和 ThreadBlock 层面是 X、Y轴 **交错** 的。
+在 `__global__ void mm_transposed_kernel()` 设备函数中，我们对B矩阵的加载，在 Grid 和 ThreadBlock 层面是 X、Y轴 **交错** 的，即：进行了**物理位置的重排（或者叫隐式转置）**，以便后续计算可以按行读取。。
 
 ```cpp
 // B
@@ -62,8 +129,25 @@ else
 
 该**交错**在全局（Grid）层面利用 X 维度，而在局部搬运（Block）层面利用 Y 维度进行索引，这是为了实现 **GMEM 的 Coalesced Access**。
 
-我们可以有如下观察：
+**访存合并 (Coalesced Access) 分析：**
 
+1.  **全局内存 GMEM 读取**：
+    矩阵 $K$ 是行主序，连续的地址在 $d$ (特征) 维度。
+    因此，warp 中的连续线程 (`threadIdx.x`) 应当读取连续的 $d$ 维度索引。
+    
+    代码如下：
+    ```cpp
+    // tidx 映射到 K 维度 (d), tidy 映射到 N 维度
+    idx = (... + tidy) * K_dim + (... + tidx); 
+    ```
+    这样保证了从 GMEM 读取 $B$ 是 Coalesced。
+
+2.  **共享内存 SMEM 写入与布局**：
+    `s_B[tidx][tidy] = ...`
+    这里我们将读取到的数据写入 SMEM，这里通常需要考虑 Bank Conflict。
+    如果是为了后续计算方便（通常计算在这个Tile上做外积或者点积），数据在 SMEM 中的排布通常会根据计算的核心循环 (Inner Loop) 方向来定。
+
+**具体而言，我们有如下观察：**
 
 $$
 {GMEM_{rowIdx(Dim_N)}} = \underbrace{\text{blockIdx.x} \times \text{NTile}}_{\text{Grid X}} + \underbrace{\text{threadIdx.y}}_{\text{Block Y}}
