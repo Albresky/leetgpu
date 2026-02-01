@@ -2,14 +2,15 @@
 
 ## 思路
 
-## Naive
+## Naive (3-Pass)
+
 目前 Ada 架构不支持 DSMEM (distributed shared memory)，不能跨block进行数据reduce，因此这里我们将在 SMEM 上面分两步进行规约：**第1步**， 每个block处理一部分gmem数据；**第2步**，单个 block 对第一步规约的结果再进行规约，得到最终规约结果。实现findmax和reduce到sum值，步骤完全一致。
 
 简单而言，以 findmax 为例。将输入的 N 个数据分布到 $BlockPerGrid = \lceil \frac{N}{BlockDim} \rceil$ 个线程块，每个线程块求本地的max值，得到 $BlockPerGrid$ 个局部 max 值；然后使用 1 个线程块，对这$BlockPerGrid$ 个值再找 max，此时该线程块内每个元素需串行找 $\frac{BlockPerGrid}{BlockDim}$ 次。
 
 *未来计划实现 Hopper（Blackwell）下利用 DSMEM 的跨线程块算法。*
 
-## Online-Softmax
+## Online-Softmax (2-Pass)
 
 详细算法推导参考 [From Online Softmax to FlashAttention](https://courses.cs.washington.edu/courses/cse599m/23sp/notes/flashattn.pdf)。
 
@@ -37,7 +38,7 @@ Online 算法的优点在于：无需提前算出 global max 值，节省了一�
 
 
 
-## Naive
+### Naive
 
 ```bash
 block_max_kernel(const float *, float *, int) (32, 1, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
@@ -107,5 +108,51 @@ softmax_kernel(const float *, float *, int, const float *, const float *) (32, 1
     smsp__inst_executed.sum                                         inst       11,264
     smsp__sass_inst_executed_op_shared_ld.sum                       inst          256
     smsp__sass_inst_executed_op_shared_st.sum                       inst          256
+    -------------------------------------------------------- ----------- ------------
+```
+
+### Online-Softmax
+
+```bash
+online_reduce_kernel(const float *, float *, float *, int) (64, 1, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: Command line profiler metrics
+    -------------------------------------------------------- ----------- ------------
+    Metric Name                                              Metric Unit Metric Value
+    -------------------------------------------------------- ----------- ------------
+    dram__throughput.avg_pct_of_peak_sustained_elapsed                        (!) n/a
+    l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum                        0
+    l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum                sector        2,048
+    l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum                sector          128
+    smsp__inst_executed.sum                                         inst      116,032
+    smsp__sass_inst_executed_op_shared_ld.sum                       inst          128
+    smsp__sass_inst_executed_op_shared_st.sum                       inst        1,024
+    -------------------------------------------------------- ----------- ------------
+
+  global_reduce_kernel(const float *, const float *, float *, float *, int) (1, 1, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: Command line profiler metrics
+    -------------------------------------------------------- ----------- ------------
+    Metric Name                                              Metric Unit Metric Value
+    -------------------------------------------------------- ----------- ------------
+    dram__throughput.avg_pct_of_peak_sustained_elapsed                        (!) n/a
+    l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum                        0
+    l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum                sector           16
+    l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum                sector            2
+    smsp__inst_executed.sum                                         inst        1,296
+    smsp__sass_inst_executed_op_shared_ld.sum                       inst            2
+    smsp__sass_inst_executed_op_shared_st.sum                       inst           16
+    -------------------------------------------------------- ----------- ------------
+
+  softmax_apply_kernel(const float *, float *, int, const float *, const float *) (64, 1, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: Command line profiler metrics
+    -------------------------------------------------------- ----------- ------------
+    Metric Name                                              Metric Unit Metric Value
+    -------------------------------------------------------- ----------- ------------
+    dram__throughput.avg_pct_of_peak_sustained_elapsed                        (!) n/a
+    l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum                        0
+    l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum                sector        3,072
+    l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum                sector        2,048
+    smsp__inst_executed.sum                                         inst       38,400
+    smsp__sass_inst_executed_op_shared_ld.sum                       inst            0
+    smsp__sass_inst_executed_op_shared_st.sum                       inst            0
     -------------------------------------------------------- ----------- ------------
 ```
