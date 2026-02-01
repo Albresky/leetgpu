@@ -3,6 +3,13 @@
 
 int main(int argc, char** argv)
 {
+  // print GPU device info
+  int device;
+  cudaGetDevice(&device);
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, device);
+  cudaPrintProperties(prop);
+
   printf("Running global main for %s...\n", argv[0]);
 
   std::unique_ptr<Problem> problem(create_problem());
