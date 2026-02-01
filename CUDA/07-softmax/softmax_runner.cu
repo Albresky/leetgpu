@@ -5,6 +5,8 @@
 
 extern "C" void solve(const float* input, float* output, int N);
 
+#define __ONLINE_SOFTMAX__
+
 class SoftmaxProblem : public Problem {
  private:
   int input_size, output_size, N;
@@ -15,7 +17,7 @@ class SoftmaxProblem : public Problem {
   float *d_i, *d_o;
 
  public:
-  SoftmaxProblem() : input_size(8192)
+  SoftmaxProblem() : input_size(16384)
   {
     output_size = input_size;
     size_i      = input_size * sizeof(float);
@@ -97,23 +99,41 @@ class SoftmaxProblem : public Problem {
 
   long long get_bytes() override
   {
-    // Naive softmax (K0) performs multiple full passes:
-    // 1) read input for max, 2) read input for sum, 3) read input for output.
-    // Additionally, with one output write and intermediate block reductions (bmax/bsum).
     const int threadsPerBlock = 256;
     const int blocksPerGrid   = (N + threadsPerBlock - 1) / threadsPerBlock;
 
     long long bytes = 0;
+#ifndef __ONLINE_SOFTMAX__
+    // Naive softmax (K0) performs 3 passes:
+    // 1) read input for max
+    // 2) read input for sum
+    // 3) read input for output.
+    // Additionally, with one output write and intermediate block reductions (bmax/bsum).
     bytes += 3LL * input_size * sizeof(float);     // input read 3 times
     bytes += 1LL * output_size * sizeof(float);    // output write once
     bytes += 2LL * blocksPerGrid * sizeof(float);  // bmax write + read
     bytes += 2LL * blocksPerGrid * sizeof(float);  // bsum write + read
     bytes += 2LL * sizeof(float);                  // max + sum scalars
+#else
+    // Online softmax performs 2 passes over input:
+    // 1. Online reduce: read input, write bmax/bsum
+    // 2. Apply: read input, read global max/sum, write output
+    // Plus intermediate global reduce of bmax/bsum
+    int effective_blocks = blocksPerGrid;
+    if (effective_blocks > 2048) effective_blocks = 2048;
+
+    bytes += 2LL * input_size * sizeof(float);        // input read 2 times
+    bytes += 1LL * output_size * sizeof(float);       // output write once
+    bytes += 2LL * effective_blocks * sizeof(float);  // bmax/bsum write
+    bytes += 2LL * effective_blocks * sizeof(float);  // bmax/bsum read
+    bytes += 2LL * sizeof(float);                     // global max/sum write
+#endif
     return bytes;
   }
 
   long long get_flops() override
   {
+#ifndef __ONLINE_SOFTMAX__
     // Rough FLOP estimate (treat exp/fmax/div as 1 op each):
     // - max reduction: (N-1) fmax
     // - sum pass: N sub + N exp + (N-1) add
@@ -123,6 +143,17 @@ class SoftmaxProblem : public Problem {
     const long long reduce_sum = (n > 0) ? (n - 1) : 0;
     const long long per_elem   = 2 /*sub*/ + 2 /*exp*/ + 1 /*div*/;
     return n * per_elem + reduce_max + reduce_sum;
+#else
+    // Online Softmax FLOPs:
+    // Pass 1 (Reduce): Combine per element (assuming b.d=1 optimization)
+    // Combine: max(1) + 2*sub + 2*exp + 1*mul + 1*add = 7 ops
+    const long long reduce = 1 + 2 + 2 + 1 + 1;
+    // Pass 3 (Apply): sub(1) + exp(1) + div(1) = 3 ops
+    const long long norm = 1 + 1 + 1;
+    
+    // Total: ~10 ops per element
+    return (reduce + norm) * input_size;
+#endif
   }
 };
 

@@ -2,11 +2,29 @@
 
 ## 思路
 
+## Naive
 目前 Ada 架构不支持 DSMEM (distributed shared memory)，不能跨block进行数据reduce，因此这里我们将在 SMEM 上面分两步进行规约：**第1步**， 每个block处理一部分gmem数据；**第2步**，单个 block 对第一步规约的结果再进行规约，得到最终规约结果。实现findmax和reduce到sum值，步骤完全一致。
 
 简单而言，以 findmax 为例。将输入的 N 个数据分布到 $BlockPerGrid = \lceil \frac{N}{BlockDim} \rceil$ 个线程块，每个线程块求本地的max值，得到 $BlockPerGrid$ 个局部 max 值；然后使用 1 个线程块，对这$BlockPerGrid$ 个值再找 max，此时该线程块内每个元素需串行找 $\frac{BlockPerGrid}{BlockDim}$ 次。
 
 *未来计划实现 Hopper（Blackwell）下利用 DSMEM 的跨线程块算法。*
+
+## Online-Softmax
+
+详细算法推导参考 [From Online Softmax to FlashAttention](https://courses.cs.washington.edu/courses/cse599m/23sp/notes/flashattn.pdf)。
+
+手推 Rescaling 递推公式：
+
+
+$$
+m_k = \max(m_{k-1}, x_k)
+$$
+
+$$
+d_k = \exp(m_{k-1}-m_k) \cdot d_{k-1} + \exp(x_k - m_k)
+$$
+
+Online 算法的优点在于：无需提前算出 global max 值，节省了一次对输入数据的 LOAD，相较 Naive 算法，IO 复杂度从 $O(3N + N)$ 降低到 $O(2N + N)$。
 
 ## 性能数据对比
 
@@ -14,7 +32,9 @@
 
 | Kernel Version | Avg Latency (ms) | Memory Bandwidth (GB/s) | Throughput (GFLOPS) |
 | :--- | :--- | :--- | :--- |
-| **(__K0) Naive (<=sm89)** | 0.0297 | 4.4294 | 1.9301 |
+| **(__K0) Naive** | 0.0293 | 8.9696 | 3.9088 |
+| **(__K1) Online-Softmax** | 0.0249 | 7.9244 | 6.5692(+68.41%) |
+
 
 
 ## Naive
