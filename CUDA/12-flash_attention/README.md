@@ -18,20 +18,24 @@
 **Description:**
 Implement the **FlashAttention V1** algorithm as described in the paper "*[FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135)*".
 
-Given a query matrix , key matrix , and value matrix , compute the attention output :
+Given a query matrix $Q$, key matrix $K$, and value matrix $V$, compute the attention output $O$ defined as:
 
-Unlike standard attention which requires  memory to store the intermediate attention score matrix () and probability matrix (), FlashAttention computes the exact result in  memory using **Tiling** and **Recomputation**, significantly reducing High Bandwidth Memory (HBM) accesses.
+$$
+O = softmax\left(\frac{QK^T}{\sqrt{d}}\right)V
+$$
+
+Unlike standard attention which requires  $O(MN)$ memory to store the intermediate attention score matrix ($S$) and probability matrix ($P$), FlashAttention computes the exact result in $O(M + N)$ memory using **Tiling** and **Recomputation**, significantly reducing High Bandwidth Memory (HBM) accesses.
 
 **Specifics:**
 
 1. **Tiling:** Load inputs into SRAM in blocks to compute partial results.
-2. **Online Softmax:** Update Softmax statistics (max  and sum ) on-the-fly without accessing the full row.
-3. **Kernel Fusion:** Fuse all operations (, Softmax, ) into a single CUDA kernel.
+2. **Online Softmax:** Update Softmax statistics (max $m$ and sum $d$) on-the-fly without accessing the full row.
+3. **Kernel Fusion:** Fuse all operations ($QK^T$, *Softmax*, $PV$) into a single CUDA kernel.
 
 **Constraints:**
 
-* Matrix dimensions:  (Sequence Length) up to 32k+,  (Head Dim) up to 128.
-* **No intermediate  matrix writes to global memory.**
+* Matrix dimensions: $M, N$ (Sequence Length) up to 32k+,  $d$      (Head Dim) up to 128.
+* **No intermediate $M \times N$ matrix writes to global memory.**
 * Use standard `float` (FP32) for accumulation.
 * Assume row-major storage.
 
