@@ -281,3 +281,93 @@ $$
     smsp__sass_inst_executed_op_shared_st.sum                       inst            0
     -------------------------------------------------------- ----------- ------------
 ```
+
+## 将手写 CUDA 算子注册到 PyTorch
+
+以 Softmax Attention 算子为例，介绍如何通过 **PyTorch C++ Extension** 机制，将手写 CUDA Kernel 封装为 PyTorch 的 Python API。
+
+### 1. 编写 C++ 绑定接口 (`attention_bind.cpp`)
+
+我们需要一个 C++ 文件作为桥梁，负责接收 Python 传入的 `torch::Tensor`，进行必要的检查和转换、提取数据指针，然后调用手写的 CUDA 函数。
+
+关键组件：
+*   **`#include <torch/extension.h>`**：引入 PyTorch C++ API
+*   **输入检查**：PyTorch Tensor 在内存中可能是非连续的（View 等操作导致），而大多数自定义 CUDA Kernel 假设内存连续，因此必须使用 `.contiguous()` 确保数据紧凑
+*   **数据指针提取**：使用 `.data_ptr<float>()` 获取 GMEM 首地址传给 CUDA Kernel
+*   **PYBIND11 宏**：定义 Python 模块名称和函数名称
+
+```cpp
+#include <torch/extension.h>
+
+// 1. 声明原始 CUDA C 函数
+extern "C" void solve(const float* Q, const float* K, const float* V, float* output, int M, int N, int d);
+
+// 2. C++ Wrapper
+torch::Tensor attention_cuda_forward(torch::Tensor Q, torch::Tensor K, torch::Tensor V) {
+    // 确保 Tensor 在内存中是连续的
+    Q = Q.contiguous();
+    K = K.contiguous();
+    V = V.contiguous();
+
+    // Shape 检查，参数提取
+    // ...
+
+    // 分配输出 Tensor
+    auto output = torch::empty({M, d}, torch::dtype(torch::kFloat32).device(Q.device()));
+
+    // 调用原始 CUDA 函数，传入裸指针
+    solve(Q.data_ptr<float>(), K.data_ptr<float>(), V.data_ptr<float>(), output.data_ptr<float>(), M, N, d);
+
+    return output;
+}
+
+// 3. 注册为 Python 模块
+// TORCH_EXTENSION_NAME 会在 setup.py 编译时确定
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("forward", &attention_cuda_forward, "Attention forward (CUDA)");
+}
+```
+
+### 2. 编写构建脚本 (`setup.py`)
+
+使用 `setuptools` 和 `torch.utils.cpp_extension` 来编译 `.cpp` 和 `.cu` 文件。
+
+```python
+from setuptools import setup
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+
+setup(
+    name='softmax_attention', # 编译后的包名
+    ext_modules=[
+        CUDAExtension(
+            'softmax_attention', 
+            [
+                'attention_bind.cpp', # C++ 绑定文件
+                'attention.cu'        # CUDA 核心实现
+            ],
+        ),
+    ],
+    cmdclass={
+        'build_ext': BuildExtension
+    }
+)
+```
+
+### 3. 编译与使用
+
+在目录下运行安装命令：
+
+```bash
+python setup.py install
+```
+
+然后在 Python 中即可直接调用：
+
+```python
+import torch
+import softmax_attention # 导入自定义模块
+
+# ... 准备数据 ...
+# 调用我们在 PYBIND11_MODULE 中定义的 .def("forward", ...)
+output = softmax_attention.forward(Q, K, V)
+```
