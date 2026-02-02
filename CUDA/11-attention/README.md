@@ -44,7 +44,7 @@ void solve(float* Q, float* K, float* V, float* output, int M, int N, int d);
 
 ## 简介
 
-> 网上关于 self-attention 看到很多代名词：Softmax Attention，Self-Attention，Scaled Dot-Product Attention，但其数学本质一样。这里纪要这些命名区别。
+> 网上关于 self-attention 看到很多名称：Softmax Attention，Self-Attention，Scaled Dot-Product Attention，但其数学本质一样。这里纪要这些命名区别。
 
 **这三者分别描述了同一个机制的不同维度：**
 
@@ -62,7 +62,7 @@ void solve(float* Q, float* K, float* V, float* output, int M, int N, int d);
 
 #### 1. Self-Attention 描述“数据从哪来”
 
-这是架构层面的定义。核心特征在于 **Q, K, V 同源**。
+从架构层面定义，特征在于 **Q, K, V 同源**。
 
 * **定义：** 输入序列  经过三个不同的线性变换矩阵 ($W_Q, W_K, W_V$) 分别得到 $Q, K, V$。即 $Q = XW_Q, K = XW_K, V = XW_V$ 。
 * **意义：** 让序列中的每一个元素都能看到序列中的其他所有元素，从而捕捉序列内部的依赖关系。
@@ -70,9 +70,7 @@ void solve(float* Q, float* K, float* V, float* output, int M, int N, int d);
 
 #### 2. Scaled Dot-Product Attention 描述“内部怎么算”
 
-这是数学层面的定义，对应你图片中的公式逻辑（图片中省略了 Scale）。
-
-* **定义：** 这是一个函数 $f(Q, K, V)$:
+从数学层面定义：这是一个函数 $f(Q, K, V)$:
 
 $$
 f(Q, K, V) = softmax\left(\frac{QK^T}{\sqrt{d_k}}\right)V
@@ -89,12 +87,11 @@ $$
   - 4. **Weighted Sum** 加权求和： $O = PV$ （乘以 V 得到输出）
 
 
-#### 3. Softmax Attention (描述“特性”)
+#### 3. Softmax Attention 描述归一化方式
 
-这是一个更宽泛的分类词。
+从归一化方式定义：任何使用 Softmax 作为归一化算子的注意力机制。
 
-* **定义：** 任何使用 Softmax 作为归一化算子的注意力机制。
-* **联系：** 因为 Scaled Dot-Product Attention 的核心步骤是 Softmax，所以它属于 Softmax Attention 的一种。与之相对的是 Linear Attention 或 Sparse Attention（使用 ReLU 或其他稀疏化算子代替 Softmax）。
+ 因为 Scaled Dot-Product Attention 的核心步骤是 Softmax，所以它属于 Softmax Attention 的一种。与之相对的是 Linear Attention 或 Sparse Attention（使用 ReLU 或其他稀疏化算子代替 Softmax）。
 
 ---
 
@@ -111,7 +108,7 @@ $$
 
 ## 思路
 
-本质就是执行 $M$ 次独立的 1D Softmax($S_i$) 操作，求得 $S_{M \times N}= Q \times K^T$ 每一行的概率分布；再乘以 $V$， 对 $d_v$ 维度的每个向量进行加权求和。
+本质就是执行 $M$ 次独立的 1D **3-Pass Softmax**($S_i$) 操作，求得 $S_{M \times N}= Q \times K^T$ 每一行的概率分布；再乘以 $V$， 对 $d_v$ 维度的每个向量进行加权求和。其中，**3-Pass** Softmax 指需要遍历 3 次 Q 矩阵的特征向量，每次**分别计算**：max、sumexp、final output，这会产生 3 次 S 矩阵 的 GMEM 重复访存。
 
 ### 关于 $C_{M \times N} = A_{M \times K} \times B_{N \times K}^T$ 的线程索引
 

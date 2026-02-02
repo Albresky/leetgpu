@@ -16,7 +16,7 @@ class AttentionProblem : public Problem {
   float *d_Q, *d_K, *d_V, *d_o;
 
  public:
-  AttentionProblem() : M(1024), N(1024), dk(1024)
+  AttentionProblem() : M(1024), N(1024), dk(256)
   {
     d = dv      = dk;  // supposing dv=dk=d
     len_Q       = M * dk;
@@ -110,16 +110,7 @@ class AttentionProblem : public Problem {
     // Q: M x d, K: N x d
     // S: M x N
     float* S = (float*)malloc(M * N * sizeof(float));
-    gemm(h_Q, h_K, S, M, dk, N, true, dk);
-    // for (int m = 0; m < M; ++m) {
-    //   for (int n = 0; n < N; ++n) {
-    //     float val = 0.0f;
-    //     for (int k = 0; k < d; ++k) {
-    //       val += h_Q[m * d + k] * h_K[n * d + k];
-    //     }
-    //     S[m * N + n] = val / sqrtf((float)d);
-    //   }
-    // }
+    gemm(h_Q, h_K, S, M, N, dk, true, dk);
 
     // 2. compute softmax(S), by row-wise
     float* S_norm = (float*)malloc(M * N * sizeof(float));
@@ -146,16 +137,7 @@ class AttentionProblem : public Problem {
     // S_norm: M x N
     // V: N x dv
     // h_golden: M x dv
-    gemm(S_norm, h_V, h_golden, M, N, dv, false);
-    // for (int m = 0; m < M; ++m) {
-    //   for (int i = 0; i < dv; ++i) {
-    //     float val = 0.0f;
-    //     for (int k = 0; k < N; ++k) {
-    //       val += S_norm[m * N + k] * h_V[k * dv + i];
-    //     }
-    //     h_golden[m * dv + i] = val;
-    //   }
-    // }
+    gemm(S_norm, h_V, h_golden, M, dv, N, false);
 
     // Verify
     double epsilon          = 1.0E-4;  // Relaxed tolerance for Attention accumulation
@@ -183,7 +165,7 @@ class AttentionProblem : public Problem {
 
   long long get_bytes() override
   {
-    const int threadsPerBlock = 512;
+    const int threadsPerBlock = 256;
     const int blocksPerGrid   = (N + threadsPerBlock - 1) / threadsPerBlock;
 
     long long bytes = 0;

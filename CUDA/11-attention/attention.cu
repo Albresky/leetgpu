@@ -212,7 +212,7 @@ extern "C" void solve(/* M*dk */ const float* Q,
   mm_transposed_kernel<TILE_SIZE><<<blockPerGrid, threadBlock>>>(Q, K, S, M, N, d, sqrtf(d));
 
   // compute softmax(S)
-  dim3 norm_threadBlock(512);
+  dim3 norm_threadBlock(256);
   dim3 norm_blockPerGrid((N + norm_threadBlock.x - 1) / norm_threadBlock.x, M);
   float* bmax = nullptr;
   float* max  = nullptr;
