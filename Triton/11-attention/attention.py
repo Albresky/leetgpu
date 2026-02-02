@@ -2,6 +2,14 @@ import torch
 import triton
 import triton.language as tl
 import math
+import time
+
+try:
+    import softmax_attention as cuda_ext
+    HAS_CUDA_EXT = True
+except ImportError:
+    HAS_CUDA_EXT = False
+    print("CUDA extension 'softmax_attention' not found. Please compile it in CUDA/11-attention/torch_extension/ first.")
 
 ############################################################
 ########## Naive Implementation of Self-Attention ##########
@@ -280,17 +288,63 @@ if __name__ == "__main__":
     K = torch.randn(N, d, device="cuda", dtype=torch.float32)
     V = torch.randn(N, d, device="cuda", dtype=torch.float32)
 
-    # triton
-    output = softmax_attention(Q, K, V)
+    print(f"Running Attention with M={M}, N={N}, d={d}")
 
-    # torch golden
+    # 1. Triton
+    triton_output = softmax_attention(Q, K, V)
+
+    # 2. Torch Golden
     t_S = torch.matmul(Q, K.transpose(0, 1)) / math.sqrt(d)
     t_P = torch.softmax(t_S, dim=-1)
     t_O = torch.matmul(t_P, V)
 
-    # check
-    if torch.allclose(output, t_O, atol=1e-3):
-        print("Test PASS!")
-    else:
-        print("Test FAILED!")
-        print("Max diff:", torch.max(torch.abs(output - t_O)))
+    # 3. CUDA Extension
+    cuda_output = None
+    if HAS_CUDA_EXT:
+        cuda_output = cuda_ext.forward(Q, K, V)
+
+    # Check
+    print("-" * 40)
+    print(f"{'Implementation':<20} | {'Max Diff':<15} | {'Status':<10}")
+    print("-" * 40)
+    
+    # Check Triton
+    diff_triton = torch.max(torch.abs(triton_output - t_O)).item()
+    status_triton = "PASS" if torch.allclose(triton_output, t_O, atol=1e-3) else "FAIL"
+    print(f"{'Triton':<20} | {diff_triton:<15.6f} | {status_triton:<10}")
+
+    # Check CUDA
+    if HAS_CUDA_EXT:
+        diff_cuda = torch.max(torch.abs(cuda_output - t_O)).item()
+        status_cuda = "PASS" if torch.allclose(cuda_output, t_O, atol=1e-3) else "FAIL"
+        print(f"{'CUDA':<20} | {diff_cuda:<15.6f} | {status_cuda:<10}")
+    
+    print("-" * 40)
+
+    # Benchmark
+    def benchmark(func, args, n_runs=100):
+        # warmup
+        for _ in range(10): func(*args)
+        torch.cuda.synchronize()
+        start = time.time()
+        for _ in range(n_runs):
+            func(*args)
+        torch.cuda.synchronize()
+        return (time.time() - start) / n_runs * 1000
+
+    print("\nBenchmarking (avg ms):")
+    
+    # Torch Wrapper
+    def torch_attn(q, k, v):
+        s = torch.matmul(q, k.transpose(0, 1)) / math.sqrt(d)
+        p = torch.softmax(s, dim=-1)
+        torch.matmul(p, v)
+
+    t_torch = benchmark(torch_attn, (Q, K, V))
+    t_triton = benchmark(softmax_attention, (Q, K, V))
+    print(f"PyTorch: {t_torch:.4f} ms")
+    print(f"Triton:  {t_triton:.4f} ms")
+
+    if HAS_CUDA_EXT:
+        t_cuda = benchmark(cuda_ext.forward, (Q, K, V))
+        print(f"CUDA:    {t_cuda:.4f} ms")
